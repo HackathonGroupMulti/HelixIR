@@ -79,8 +79,10 @@ class TestBottleneckAnalyzer:
         assert r.ridge_point > 0
 
     def test_large_matmul_compute_bound(self):
-        x = jnp.ones((128, 4096))
-        w = jnp.ones((4096, 4096))
+        # Square 1024×1024 matmul: intensity = 2*M³ / (3*M²*4) = M/6 ≈ 171 FLOP/byte
+        # A100 ridge point = 312 TFLOPS / 2 TB/s = 156 FLOP/byte → compute-bound
+        x = jnp.ones((1024, 1024))
+        w = jnp.ones((1024, 1024))
         _, graph = capture(matmul_fn, x, w)
         graph = analyze_memory(graph)
         r = analyze_bottleneck(graph, device="A100")
