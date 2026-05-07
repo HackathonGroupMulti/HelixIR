@@ -1,5 +1,10 @@
 # HelixIR
 
+[![CI](https://github.com/ConmanTrialsOfKami/HelixIR/actions/workflows/ci.yml/badge.svg)](https://github.com/ConmanTrialsOfKami/HelixIR/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ConmanTrialsOfKami/HelixIR/blob/main/demo.ipynb)
+
 **Automatic performance optimizer for JAX programs.**
 
 HelixIR traces your JAX function through its compiler intermediate representation, classifies every op on a hardware roofline model, and gives you three things: fusion/checkpointing/sharding recommendations, Megatron-style sharding code you can paste directly into a training script, and a breakdown of backward-pass FLOP cost. Everything works offline — no GPU required for analysis.
