@@ -10,15 +10,28 @@ Quick start
     def my_model(x, w):
         return jnp.dot(x, w)
 
-    out = my_model(x, w)          # prints analysis report on first call
-    report = my_model._helix_report   # access the structured report dict
+    out = my_model(x, w)              # prints analysis on first call
+    report = my_model._helix_report   # access structured report dict
 
-Full API
---------
-    report = helix.analyze(fn, *args)         # returns dict
-    helix.benchmark(fn, *args, name="…")      # returns BenchmarkResult
-    helix.compare([result_a, result_b])        # speedup table string
-    helix.capture_stablehlo(fn, *args)         # StableHLO text
+Sharding code generation
+------------------------
+    plan = helix.generate_sharding(
+        my_model, x, w,
+        mesh_shape=(2, 4),
+        arg_names=['x', 'w'],
+    )
+    print(plan.code)   # copy-paste into training script
+
+Backward pass analysis
+----------------------
+    bwd  = helix.analyze_backward(my_model, x, w)
+    full = helix.analyze_full(my_model, x, w)
+    print(f"bwd/fwd FLOP ratio: {full['bwd_fwd_flop_ratio']:.2f}×")
+
+Jupyter integration
+-------------------
+    %load_ext helix.jupyter
+    %helix my_model x w --bwd --devices 8
 """
 from __future__ import annotations
 import functools
@@ -33,11 +46,20 @@ from .passes.fusion_advisor import FusionAdvisorPass
 from .passes.checkpoint_advisor import CheckpointAdvisorPass
 from .passes.sharding_advisor import ShardingAdvisorPass
 from .benchmark.runner import benchmark, compare, BenchmarkResult
+from .sharding import generate_sharding, ShardingPlan
+from .backward import analyze_backward, analyze_full, print_full_report
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
+    # Core analysis
     "profile", "analyze",
+    # Sharding
+    "generate_sharding", "ShardingPlan",
+    # Backward
+    "analyze_backward", "analyze_full", "print_full_report",
+    # Benchmark
     "benchmark", "compare", "BenchmarkResult",
+    # Low-level
     "capture", "capture_stablehlo", "xla_cost_analysis",
     "OpGraph", "RooflineResult",
 ]
