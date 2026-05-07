@@ -125,8 +125,9 @@ def _classify_arg(
     if not shape:
         return TensorPlan(name, shape, "replicated", (None,), "scalar")
 
-    if is_activation and shape[0] == batch_size:
-        # Shard batch across data-parallel axis; leave rest unreplicated
+    # Treat any non-weight tensor whose first dim matches batch_size as an
+    # activation — catches inputs fed through einsum rather than dot_general.
+    if not is_weight and shape[0] == batch_size:
         spec = ("batch",) + (None,) * (len(shape) - 1)
         return TensorPlan(name, shape, "activation", spec,
                           f"first dim {shape[0]} == batch_size {batch_size}")

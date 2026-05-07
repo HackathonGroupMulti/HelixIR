@@ -101,10 +101,10 @@ if _PALLAS:
             out_shape=jax.ShapeDtypeStruct(x_flat.shape, x_flat.dtype),
             grid=(n_rows,),
             in_specs=[
-                pl.BlockSpec(lambda i: (i, 0), (1, hidden)),
-                pl.BlockSpec(lambda i: (0,),   (hidden,)),
+                pl.BlockSpec(index_map=lambda i: (i, 0), block_shape=(1, hidden)),
+                pl.BlockSpec(index_map=lambda i: (0,),   block_shape=(hidden,)),
             ],
-            out_specs=pl.BlockSpec(lambda i: (i, 0), (1, hidden)),
+            out_specs=pl.BlockSpec(index_map=lambda i: (i, 0), block_shape=(1, hidden)),
         )(x_flat, w)
 
         return out_flat.reshape(x.shape)

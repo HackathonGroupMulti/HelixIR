@@ -155,13 +155,13 @@ if _PALLAS:
                 ],
                 grid=(n_blocks_q,),
                 in_specs=[
-                    pl.BlockSpec(lambda i: (i * block_q, 0), (block_q, D)),
-                    pl.BlockSpec(lambda i: (0, 0),           (S, D)),
-                    pl.BlockSpec(lambda i: (0, 0),           (S, D)),
+                    pl.BlockSpec(index_map=lambda i: (i * block_q, 0), block_shape=(block_q, D)),
+                    pl.BlockSpec(index_map=lambda i: (0, 0),           block_shape=(S, D)),
+                    pl.BlockSpec(index_map=lambda i: (0, 0),           block_shape=(S, D)),
                 ],
                 out_specs=[
-                    pl.BlockSpec(lambda i: (i * block_q, 0), (block_q, D)),
-                    pl.BlockSpec(lambda i: (i * block_q,),   (block_q,)),
+                    pl.BlockSpec(index_map=lambda i: (i * block_q, 0), block_shape=(block_q, D)),
+                    pl.BlockSpec(index_map=lambda i: (i * block_q,),   block_shape=(block_q,)),
                 ],
             )(q_h, k_h, v_h)
             return out

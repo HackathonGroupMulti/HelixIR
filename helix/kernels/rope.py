@@ -119,14 +119,14 @@ if _PALLAS:
             ],
             grid=(n_bh, n_s),
             in_specs=[
-                pl.BlockSpec(lambda bh, s: (bh, s, 0), (1, 1, n_half)),
-                pl.BlockSpec(lambda bh, s: (bh, s, 0), (1, 1, n_half)),
-                pl.BlockSpec(lambda bh, s: (s, 0),     (1, n_half)),
-                pl.BlockSpec(lambda bh, s: (s, 0),     (1, n_half)),
+                pl.BlockSpec(index_map=lambda bh, s: (bh, s, 0), block_shape=(1, 1, n_half)),
+                pl.BlockSpec(index_map=lambda bh, s: (bh, s, 0), block_shape=(1, 1, n_half)),
+                pl.BlockSpec(index_map=lambda bh, s: (s, 0),     block_shape=(1, n_half)),
+                pl.BlockSpec(index_map=lambda bh, s: (s, 0),     block_shape=(1, n_half)),
             ],
             out_specs=[
-                pl.BlockSpec(lambda bh, s: (bh, s, 0), (1, 1, n_half)),
-                pl.BlockSpec(lambda bh, s: (bh, s, 0), (1, 1, n_half)),
+                pl.BlockSpec(index_map=lambda bh, s: (bh, s, 0), block_shape=(1, 1, n_half)),
+                pl.BlockSpec(index_map=lambda bh, s: (bh, s, 0), block_shape=(1, 1, n_half)),
             ],
         )(x1, x2, cos, sin)
 
