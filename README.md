@@ -1,9 +1,9 @@
 # HelixIR
 
-[![CI](https://github.com/ConmanTrialsOfKami/HelixIR/actions/workflows/ci.yml/badge.svg)](https://github.com/ConmanTrialsOfKami/HelixIR/actions/workflows/ci.yml)
+[![CI](https://github.com/HackathonGroupMulti/HelixIR/actions/workflows/ci.yml/badge.svg)](https://github.com/HackathonGroupMulti/HelixIR/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ConmanTrialsOfKami/HelixIR/blob/main/demo.ipynb)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HackathonGroupMulti/HelixIR/blob/main/demo.ipynb)
 
 **Automatic performance optimizer for JAX programs.**
 
@@ -244,7 +244,7 @@ helix/
 ## Development
 
 ```bash
-git clone https://github.com/ConmanTrialsOfKami/HelixIR
+git clone https://github.com/HackathonGroupMulti/HelixIR
 cd HelixIR
 pip install -e ".[dev]"
 pytest tests/
