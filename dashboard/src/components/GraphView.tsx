@@ -98,11 +98,11 @@ export function GraphView({ graph, width = 900, height = 500 }: Props) {
       .attr("stroke-width", 1.5)
       .attr("marker-end", "url(#arrow)");
 
-    const node = g.append("g")
+    const node = (g.append("g")
       .selectAll("g")
       .data(nodes)
       .join("g")
-      .attr("cursor", "pointer")
+      .attr("cursor", "pointer") as d3.Selection<SVGGElement, D3Node, SVGGElement, unknown>)
       .call(
         d3.drag<SVGGElement, D3Node>()
           .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })

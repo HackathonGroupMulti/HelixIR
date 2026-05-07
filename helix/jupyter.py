@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import json
 import textwrap
+import traceback
 import html as _html
 from typing import Any
 
@@ -328,6 +329,29 @@ def _render_html(report: dict, fn_name: str, bwd_report: dict | None = None) -> 
 
 
 # ---------------------------------------------------------------------------
+# Error display
+# ---------------------------------------------------------------------------
+
+def _error_html(title: str, detail: str = "", tb: str = "") -> str:
+    detail_html = f'<div style="color:#fca5a5;font-size:12px;margin-top:6px">{_html.escape(detail)}</div>' if detail else ""
+    tb_html = ""
+    if tb:
+        tb_html = (
+            '<pre style="margin-top:10px;padding:8px;background:#1e293b;border-radius:4px;'
+            'font-size:11px;color:#94a3b8;white-space:pre-wrap;overflow-x:auto">'
+            f'{_html.escape(tb.strip())}</pre>'
+        )
+    return (
+        '<div style="background:#0f172a;color:#f1f5f9;font-family:monospace;padding:12px 16px;'
+        'border-radius:8px;border:1px solid #7f1d1d">'
+        '<span style="color:#f87171;font-weight:bold">HelixIR error</span>'
+        f'<span style="color:#94a3b8;font-size:12px;margin-left:10px">{_html.escape(title)}</span>'
+        f'{detail_html}{tb_html}'
+        '</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # IPython magic
 # ---------------------------------------------------------------------------
 
@@ -355,6 +379,9 @@ def load_ipython_extension(ipython):
     from IPython.core.magic import register_line_magic, register_cell_magic
     from IPython.display import display, HTML
 
+    def _show_error(title: str, detail: str = "", tb: str = "") -> None:
+        display(HTML(_error_html(title, detail, tb)))
+
     @register_line_magic
     def helix(line):
         """
@@ -368,21 +395,21 @@ def load_ipython_extension(ipython):
         ns = ipython.user_ns
 
         if fn_name not in ns:
-            print(f"[HelixIR] '{fn_name}' not found in namespace.")
+            _show_error(f"'{fn_name}' not found in namespace")
             return
 
         fn   = ns[fn_name]
         args = []
         for a in arg_names:
             if a not in ns:
-                print(f"[HelixIR] argument '{a}' not found in namespace.")
+                _show_error(f"argument '{a}' not found in namespace")
                 return
             args.append(ns[a])
 
         try:
             report = _helix.analyze(fn, *args, num_devices=opts["devices"])
         except Exception as exc:
-            print(f"[HelixIR] Analysis failed: {exc}")
+            _show_error("Analysis failed", str(exc), traceback.format_exc())
             return
 
         bwd_report = None
@@ -391,10 +418,9 @@ def load_ipython_extension(ipython):
                 from helix.backward import analyze_backward
                 bwd_report = analyze_backward(fn, *args)
             except Exception as exc:
-                print(f"[HelixIR] Backward analysis failed: {exc}")
+                _show_error("Backward analysis failed", str(exc), traceback.format_exc())
 
-        html = _render_html(report, fn_name, bwd_report)
-        display(HTML(html))
+        display(HTML(_render_html(report, fn_name, bwd_report)))
 
     @register_cell_magic
     def helix_cell(line, cell):
@@ -412,24 +438,23 @@ def load_ipython_extension(ipython):
         # Execute the cell to define the function
         ipython.run_cell(cell)
         if "fn" not in ipython.user_ns:
-            print("[HelixIR] Define a function named 'fn' in the cell.")
+            _show_error("Define a function named 'fn' in the cell")
             return
 
         fn   = ipython.user_ns["fn"]
         args = []
         for a in arg_names:
             if a not in ns:
-                print(f"[HelixIR] argument '{a}' not found in namespace.")
+                _show_error(f"argument '{a}' not found in namespace")
                 return
             args.append(ns[a])
 
         try:
             report = _helix.analyze(fn, *args, num_devices=opts.get("devices", 8))
         except Exception as exc:
-            print(f"[HelixIR] Analysis failed: {exc}")
+            _show_error("Analysis failed", str(exc), traceback.format_exc())
             return
 
-        from IPython.display import display, HTML
         display(HTML(_render_html(report, "fn")))
 
     # Register %%helix as the cell magic alias
