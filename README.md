@@ -208,6 +208,25 @@ LLaMA-style block (RMSNorm → QKV → attention → out-proj → FFN gate/up/do
 
 Low utilization is expected: this is a single-batch inference run, not a fused training loop. Enabling Flash Attention, gradient checkpointing, and multi-device sharding (all of which HelixIR can generate) are the next levers.
 
+### Runtime diagnostics — transformer attention block (T4)
+
+`helix.runtime_diagnostics` on a 5-op QKV + attention + out-proj block (B=4, S=512, D=1024):
+
+| metric | value |
+|---|---|
+| Compile latency (first JIT call) | 643.3 ms |
+| Steady-state run latency | 7.2 ms |
+| **JIT speedup** | **89×** |
+| `helix.analyze()` overhead | 1.0 ms |
+| HelixIR FLOP estimate | 23.6 GFLOPs |
+| HelixIR memory estimate | 167.9 MB |
+| Compute-bound ops | 31.2% |
+| Bandwidth-bound ops | 68.8% |
+| Recompile overhead (new shape) | 579.7 ms |
+| Break-even calls at new shape | 81 calls |
+
+The 89× JIT speedup means a single compile amortizes across any realistic inference run. The break-even of 81 calls quantifies exactly when padding inputs to a fixed shape is cheaper than eating a recompile — HelixIR surfaces this directly so you don't have to guess.
+
 ---
 
 ## Architecture
