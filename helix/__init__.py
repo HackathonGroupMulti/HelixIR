@@ -48,6 +48,7 @@ from .passes.sharding_advisor import ShardingAdvisorPass
 from .benchmark.runner import benchmark, compare, BenchmarkResult
 from .sharding import generate_sharding, ShardingPlan
 from .backward import analyze_backward, analyze_full, print_full_report
+from .diagnostics import runtime_diagnostics, print_diagnostics
 
 __version__ = "0.2.0"
 __all__ = [
@@ -57,6 +58,8 @@ __all__ = [
     "generate_sharding", "ShardingPlan",
     # Backward
     "analyze_backward", "analyze_full", "print_full_report",
+    # Diagnostics
+    "runtime_diagnostics", "print_diagnostics",
     # Benchmark
     "benchmark", "compare", "BenchmarkResult",
     # Low-level
