@@ -35,6 +35,7 @@ class TestRuntimeDiagnostics:
             "estimated_bytes", "xla_bytes", "memory_accuracy_pct",
             "roofline_compute_pct", "roofline_bw_pct", "ridge_point",
             "recompile_risk", "recompile_overhead_ms",
+            "recompile_breakeven_calls", "recompile_advice",
         }
         assert expected.issubset(d.keys())
 
@@ -95,6 +96,18 @@ class TestRuntimeDiagnostics:
         x, w = self._args()
         d = runtime_diagnostics(matmul_fn, x, w, iters=5)
         assert d["memory_accuracy_pct"] is None or isinstance(d["memory_accuracy_pct"], float)
+
+    def test_recompile_advice_is_list_of_strings(self):
+        x, w = self._args()
+        d = runtime_diagnostics(matmul_fn, x, w, iters=5)
+        assert isinstance(d["recompile_advice"], list)
+        assert all(isinstance(s, str) for s in d["recompile_advice"])
+        assert len(d["recompile_advice"]) >= 1
+
+    def test_breakeven_nonnegative(self):
+        x, w = self._args()
+        d = runtime_diagnostics(matmul_fn, x, w, iters=5)
+        assert d["recompile_breakeven_calls"] >= 0
 
     def test_mlp_diagnostics(self):
         x  = jax.random.normal(jax.random.PRNGKey(0), (4, 32))

@@ -144,8 +144,10 @@ def runtime_diagnostics(
       ridge_point           FLOP/byte crossover for the target device
 
     Recompile
-      recompile_risk        True if shape changes would trigger recompilation
-      recompile_overhead_ms Cost paid per new shape (0 if no recompile detected)
+      recompile_risk            True if shape changes would trigger recompilation
+      recompile_overhead_ms     Cost paid per new shape (0 if no recompile detected)
+      recompile_breakeven_calls Calls needed at new shape to amortize recompile cost
+      recompile_advice          List of actionable fixes ranked by impact
     """
     from . import analyze  # avoid circular import
 
@@ -192,35 +194,101 @@ def runtime_diagnostics(
     compute_pct  = len(r.compute_bound_ops) / n_classified * 100 if n_classified else 0.0
     bw_pct       = len(r.bandwidth_bound_ops) / n_classified * 100 if n_classified else 0.0
 
-    # ── 6: Recompile risk ─────────────────────────────────────────────────────
+    # ── 6: Recompile risk + advice ────────────────────────────────────────────
     recompile_risk, recompile_overhead_ms = _check_recompile(fn_jit, args, run_latency_ms)
+
+    breakeven = (
+        int(recompile_overhead_ms / run_latency_ms) + 1
+        if recompile_risk and run_latency_ms > 0
+        else 0
+    )
+    advice = _recompile_advice(args, recompile_risk, compile_overhead, run_latency_ms)
 
     return {
         # Latency
-        "compile_latency_ms":    round(compile_latency_ms, 3),
-        "run_latency_ms":        round(run_latency_ms, 3),
-        "compile_overhead_ms":   round(compile_overhead, 3),
-        "jit_speedup":           round(jit_speedup, 1),
+        "compile_latency_ms":         round(compile_latency_ms, 3),
+        "run_latency_ms":             round(run_latency_ms, 3),
+        "compile_overhead_ms":        round(compile_overhead, 3),
+        "jit_speedup":                round(jit_speedup, 1),
         # Analysis cost
-        "analysis_overhead_ms":  round(analysis_overhead_ms, 3),
+        "analysis_overhead_ms":       round(analysis_overhead_ms, 3),
         # FLOP accuracy
-        "estimated_flops":       est_flops,
-        "xla_flops":             int(xla_flops),
-        "flop_accuracy_pct":     _accuracy(est_flops, xla_flops),
+        "estimated_flops":            est_flops,
+        "xla_flops":                  int(xla_flops),
+        "flop_accuracy_pct":          _accuracy(est_flops, xla_flops),
         # Memory accuracy
-        "estimated_bytes":       est_bytes,
-        "xla_bytes":             int(xla_bytes),
-        "memory_accuracy_pct":   _accuracy(est_bytes, xla_bytes),
+        "estimated_bytes":            est_bytes,
+        "xla_bytes":                  int(xla_bytes),
+        "memory_accuracy_pct":        _accuracy(est_bytes, xla_bytes),
         # Roofline
-        "roofline_compute_pct":  round(compute_pct, 1),
-        "roofline_bw_pct":       round(bw_pct, 1),
-        "ridge_point":           r.ridge_point,
+        "roofline_compute_pct":       round(compute_pct, 1),
+        "roofline_bw_pct":            round(bw_pct, 1),
+        "ridge_point":                r.ridge_point,
         # Recompile
-        "recompile_risk":        recompile_risk,
-        "recompile_overhead_ms": recompile_overhead_ms,
+        "recompile_risk":             recompile_risk,
+        "recompile_overhead_ms":      recompile_overhead_ms,
+        "recompile_breakeven_calls":  breakeven,
+        "recompile_advice":           advice,
         # Downstream use
-        "_report":               report,
+        "_report":                    report,
     }
+
+
+# ---------------------------------------------------------------------------
+# Recompile advice
+# ---------------------------------------------------------------------------
+
+def _recompile_advice(
+    args: tuple,
+    risk: bool,
+    compile_overhead_ms: float,
+    run_latency_ms: float,
+) -> list[str]:
+    """
+    Return ranked, actionable advice for reducing recompilation cost.
+    Always returned even when risk=False (preventive guidance).
+    """
+    tips: list[str] = []
+
+    if risk:
+        # How bad is it?
+        ratio = compile_overhead_ms / run_latency_ms if run_latency_ms > 0 else 0
+        tips.append(
+            f"Pad inputs to a fixed shape so every call hits the same JIT trace. "
+            f"Each new shape pays ~{compile_overhead_ms:.0f} ms overhead "
+            f"({ratio:.0f}× a steady-state call)."
+        )
+        tips.append(
+            "Use jax.jit(fn, static_argnums=...) for integer / shape arguments "
+            "that change but should not retrace array-valued args."
+        )
+        # Check if any arg has a small leading dim — likely a batch size
+        for i, a in enumerate(args):
+            if hasattr(a, "shape") and a.shape and a.shape[0] <= 8:
+                tips.append(
+                    f"Arg {i} has batch size {a.shape[0]}. If batch size varies, "
+                    f"use jax.vmap over a fixed single-item batch instead of "
+                    f"calling with different batch sizes."
+                )
+                break
+        tips.append(
+            "For dynamic sequence lengths, pad to the next power-of-two bucket "
+            "(128, 256, 512, …) — limits distinct shapes to O(log S) traces."
+        )
+    else:
+        tips.append(
+            "No recompile detected for the tested shape perturbation. "
+            "Keep inputs at consistent shapes to maintain this behaviour."
+        )
+        if compile_overhead_ms > run_latency_ms * 5:
+            tips.append(
+                f"Compile overhead is {compile_overhead_ms:.0f} ms vs "
+                f"{run_latency_ms:.1f} ms per run. Ensure the function is "
+                f"called enough times (>{int(compile_overhead_ms/run_latency_ms)}) "
+                f"to amortize compilation before benchmarking."
+            )
+
+    return tips
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +340,24 @@ def print_diagnostics(diag: dict, fn_name: str = "fn") -> None:
     risk_str = "YES" if diag["recompile_risk"] else "no"
     print(f"  {'Shape-change triggers recompile':<{w}} {risk_str}")
     if diag["recompile_risk"]:
-        print(f"  {'Recompile overhead (per new shape)':<{w}} {_ms(diag['recompile_overhead_ms'])}")
+        print(f"  {'Overhead per new shape':<{w}} {_ms(diag['recompile_overhead_ms'])}")
+        print(f"  {'Break-even calls at new shape':<{w}} {diag['recompile_breakeven_calls']} calls")
+
+    print(f"\n  {'── Recompile advice':─<{w+18}}")
+    for i, tip in enumerate(diag["recompile_advice"], 1):
+        # Word-wrap at 74 chars
+        words = tip.split()
+        line, lines = [], []
+        for word in words:
+            if len(" ".join(line + [word])) > 74:
+                lines.append(" ".join(line))
+                line = [word]
+            else:
+                line.append(word)
+        if line:
+            lines.append(" ".join(line))
+        print(f"  {i}. {lines[0]}")
+        for cont in lines[1:]:
+            print(f"     {cont}")
 
     print(f"\n{sep}\n")
