@@ -27,6 +27,14 @@ def _vllm_available() -> bool:
         return False
 
 
+def _hf_available() -> bool:
+    try:
+        import torch, transformers  # noqa: F401
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
 @dataclass
 class ServingResult:
     backend: str            # "vllm" | "analytic"
@@ -112,6 +120,55 @@ def _measure_vllm(
     return ttft_ms, tpot_ms, throughput
 
 
+def _measure_hf(
+    model: str, batch: int, prompt_len: int, gen_len: int,
+) -> tuple[float, float, float]:
+    """
+    Measure (ttft_ms, tpot_ms, throughput_tok_s) with HuggingFace transformers.
+
+    A reliable real-hardware fallback when vLLM won't install (e.g. free Colab).
+    TTFT is a 1-token generation; TPOT is derived from a longer generation with
+    the prefill cost subtracted.  Uses random token ids so prompt_len is exact.
+    """
+    import time
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model)
+    lm = AutoModelForCausalLM.from_pretrained(
+        model, torch_dtype=torch.float16).cuda().eval()
+    vocab = getattr(tok, "vocab_size", None) or lm.config.vocab_size
+    ids = torch.randint(5, vocab, (batch, prompt_len), device="cuda")
+    mask = torch.ones_like(ids)
+    pad = tok.eos_token_id if tok.eos_token_id is not None else 0
+
+    def gen(n: int) -> None:
+        with torch.no_grad():
+            lm.generate(ids, attention_mask=mask, max_new_tokens=n,
+                        do_sample=False, pad_token_id=pad)
+
+    for _ in range(2):                 # warm up CUDA kernels / caches
+        gen(4)
+    torch.cuda.synchronize(); t0 = time.perf_counter()
+    gen(1); torch.cuda.synchronize()
+    ttft_ms = (time.perf_counter() - t0) * 1e3
+
+    torch.cuda.synchronize(); t0 = time.perf_counter()
+    gen(gen_len); torch.cuda.synchronize()
+    full_ms = (time.perf_counter() - t0) * 1e3
+
+    decode_ms = max(full_ms - ttft_ms, 0.0)
+    tpot_ms = decode_ms / max(gen_len - 1, 1)
+    throughput = (batch * gen_len) / (full_ms / 1e3) if full_ms > 0 else 0.0
+    return ttft_ms, tpot_ms, throughput
+
+
+_BACKENDS = {
+    "vllm": (_vllm_available, _measure_vllm),
+    "hf":   (_hf_available,   _measure_hf),
+}
+
+
 def serving_benchmark(
     cfg: ModelConfig,
     batch: int = 1,
@@ -127,10 +184,14 @@ def serving_benchmark(
     Parameters
     ----------
     cfg      : model shape (drives the analytic estimate).
-    model    : HF model id/path for vLLM.  Required to actually measure; if None
-               or vLLM is unavailable, returns the analytic estimate.
-    backend  : "auto" (measure if possible, else analytic), "vllm" (force
-               measure — raises if unavailable), or "analytic" (never measure).
+    model    : HF model id/path.  Required to actually measure; if None or no
+               engine is usable, returns the analytic estimate.
+    backend  : "auto"  — try vLLM, then HuggingFace, then analytic;
+               "vllm" / "hf" — force that engine (raises if it can't run);
+               "analytic" — never measure.
+
+    A measurement engine that imports but fails at load time (e.g. vLLM with a
+    CUDA-version mismatch) is caught and the next engine is tried.
     """
     analytic = analyze_inference(cfg, batch=batch, prompt_len=prompt_len,
                                  gen_len=gen_len, device=device)
@@ -138,17 +199,34 @@ def serving_benchmark(
     a_tpot = analytic["ms_per_output_token"]
     dev = analytic["device"]
 
-    want_measure = backend in ("auto", "vllm") and model is not None and _vllm_available()
-    if backend == "vllm" and not want_measure:
+    order = {"auto": ["vllm", "hf"], "vllm": ["vllm"], "hf": ["hf"],
+             "analytic": []}.get(backend, ["vllm", "hf"])
+
+    measured: tuple[float, float, float] | None = None
+    used = ""
+    if model:
+        for name in order:
+            available, measure = _BACKENDS[name]
+            if not available():
+                continue
+            try:
+                measured = measure(model, batch, prompt_len, gen_len)
+                used = name
+                break
+            except Exception as exc:            # engine present but failed to run
+                print(f"[serving] {name} backend failed "
+                      f"({type(exc).__name__}: {exc}); trying next.")
+
+    if backend in ("vllm", "hf") and measured is None:
         raise RuntimeError(
-            "backend='vllm' requires vLLM installed and model=<id> "
-            "(pip install vllm; needs a CUDA GPU)."
+            f"backend={backend!r} could not run (needs the engine installed, a "
+            f"CUDA GPU, and model=<id>)."
         )
 
-    if want_measure:
-        ttft_ms, tpot_ms, throughput = _measure_vllm(model, batch, prompt_len, gen_len)
+    if measured is not None:
+        ttft_ms, tpot_ms, throughput = measured
         return ServingResult(
-            backend="vllm", model=model, batch=batch, prompt_len=prompt_len,
+            backend=used, model=model, batch=batch, prompt_len=prompt_len,
             gen_len=gen_len, device=dev,
             ttft_ms=round(ttft_ms, 3), tpot_ms=round(tpot_ms, 4),
             throughput_tok_s=round(throughput, 1),
@@ -173,15 +251,16 @@ def print_serving_result(res: ServingResult) -> None:
     print(f"\n{sep}")
     print(f"  HelixIR Serving Benchmark · {res.model}")
     print(sep)
-    print(f"  {'Backend':<{w}} {res.backend}"
-          f"{'  (vLLM unavailable — estimate)' if res.backend == 'analytic' else ''}")
+    label = {"vllm": "vLLM (measured)", "hf": "HF transformers (measured)",
+             "analytic": "analytic (no engine — estimate)"}.get(res.backend, res.backend)
+    print(f"  {'Backend':<{w}} {label}")
     print(f"  {'Device':<{w}} {res.device}")
     print(f"  {'Workload (B / prompt / gen)':<{w}} "
           f"{res.batch} / {res.prompt_len} / {res.gen_len}")
     print(f"  {'TTFT':<{w}} {res.ttft_ms:.2f} ms")
     print(f"  {'Time per output token':<{w}} {res.tpot_ms:.3f} ms")
     print(f"  {'Throughput':<{w}} {res.throughput_tok_s:.0f} tok/s")
-    if res.backend == "vllm":
+    if res.backend != "analytic":
         print(f"\n  {'── Analytic vs measured':─<{w+22}}")
         print(f"  {'Predicted TTFT':<{w}} {res.analytic_ttft_ms:.2f} ms "
               f"({res.ttft_error_pct}% off)")
