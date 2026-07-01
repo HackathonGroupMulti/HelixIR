@@ -83,7 +83,16 @@ def _measure_vllm(
     """
     from vllm import LLM, SamplingParams  # imported lazily
 
-    llm = LLM(model=model, enforce_eager=True)
+    # dtype="half" forces fp16 — Turing (T4, sm 7.5) has no bf16, and many small
+    # checkpoints default to bf16.  Cap max_model_len so short runs don't over-
+    # allocate the KV cache on a small GPU.
+    llm = LLM(
+        model=model,
+        enforce_eager=True,
+        dtype="half",
+        gpu_memory_utilization=0.9,
+        max_model_len=max(prompt_len + gen_len + 16, 1024),
+    )
     prompt = "word " * prompt_len
     prompts = [prompt] * batch
 
