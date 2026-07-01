@@ -15,6 +15,8 @@ _DEVICE_SPECS: dict[str, dict[str, float]] = {
     "RTX 4090":          {"peak_flops": 165e12,  "peak_bw": 1.0e12},
     "RTX 3090":          {"peak_flops": 71e12,   "peak_bw": 936e9},
     "RTX 3080":          {"peak_flops": 60e12,   "peak_bw": 760e9},
+    "L4":                {"peak_flops": 121e12,  "peak_bw": 300e9},
+    "T4":                {"peak_flops": 65e12,   "peak_bw": 320e9},
     "CPU":               {"peak_flops": 1e12,    "peak_bw": 50e9},
 }
 

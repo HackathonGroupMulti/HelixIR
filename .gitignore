@@ -1,0 +1,28 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging / build
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

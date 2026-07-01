@@ -26,6 +26,7 @@ pip install "helixir[jupyter]"        # + %helix magic
 | **Advise** | Three passes emit ranked recommendations: XLA fusion groups, activation checkpointing targets, and sharding strategy |
 | **Generate** | `generate_sharding` emits copy-paste device-placement code using `jax.device_put` + `NamedSharding` |
 | **Backward** | `analyze_backward` traces `jax.vjp` to report the true bwd/fwd FLOP ratio |
+| **Inference** | `analyze_inference` models LLM serving: KV-cache footprint, multi-tier offload, and prefill (compute-bound) vs. decode (memory-bound) roofline classification |
 
 ---
 
@@ -127,6 +128,72 @@ This matches the theoretical ~3× rule for transformer backward passes and gives
 
 ---
 
+## LLM inference analysis (KV-cache, prefill vs. decode)
+
+Serving an autoregressive model is bottlenecked by the **KV cache**, not the weights, and the two phases sit on opposite sides of the roofline: prefill is compute-bound, decode is memory-bandwidth-bound. `analyze_inference` models this analytically — no GPU required — including a FlexKV-style multi-tier offload plan when the cache overflows HBM:
+
+```python
+from helix.inference import ModelConfig, analyze_inference, print_inference_report
+
+cfg = ModelConfig.from_preset("llama3-8b")          # GQA-aware; also 7b/13b/70b, mistral, qwen2
+report = analyze_inference(cfg, batch=64, prompt_len=4096, gen_len=256, device="A100")
+print_inference_report(report)
+```
+
+```
+── Prefill────────────────────────────────
+  Arithmetic intensity   83739.5 FLOP/byte
+  Ridge point            156 FLOP/byte
+  Classification         COMPUTE-BOUND
+
+── Decode─────────────────────────────────
+  Arithmetic intensity   19.8 FLOP/byte
+  Classification         MEMORY-BOUND
+
+── Serving────────────────────────────────
+  Decode throughput      2435 tok/s
+
+  Advice
+  1. Decode is memory-bound (AI 19.8 < ridge 156). Extra FLOPs won't help;
+     the wins are KV-cache reuse (prefix/paged), fp8 KV, and batching.
+  2. Separate prefill and decode onto different schedules/devices — the basis
+     of disaggregated / chunked-prefill serving in vLLM and SGLang.
+```
+
+When the cache exceeds free HBM, `plan_kv_offload` spills it across GPU → CPU → NVMe → remote tiers and reports the blended read bandwidth and the resulting decode slowdown — the quantity a KV-offload framework has to minimize.
+
+### Batch × context sweep
+
+`helix infer-sweep` (or `sweep_inference`) grids over batch and prompt length so you can see exactly where the KV cache overflows HBM and decode throughput collapses:
+
+```bash
+helix infer-sweep llama3-8b --batches 1,16,64,256 --prompts 4096 --device A100
+```
+
+| B | prompt | KV GB | HBM | TPOT ms | tok/s | slow× |
+|---|---|---|---|---|---|---|
+| 1 | 4096 | 0.55 | yes | 8.31 | 120 | 1.00 |
+| 16 | 4096 | 8.86 | yes | 12.46 | 1284 | 1.00 |
+| 64 | 4096 | 35.43 | yes | 25.75 | 2486 | 1.00 |
+| 256 | 4096 | 141.73 | **no** | 1489.80 | 172 | **20.91** |
+
+Throughput scales with batch (decode is memory-bound, so larger batches are near-free) right up to batch 256, where the 142 GB cache overflows the A100's 80 GB and spills to CPU/SSD — a 20.9× decode slowdown. `--format markdown|csv` emits the table for reports or CI.
+
+### Serving benchmark (vLLM, with analytic fallback)
+
+`serving_benchmark` measures TTFT / TPOT under vLLM when a GPU and model are available, and validates the analytic estimate against the measured numbers. On a CPU box it degrades cleanly to the analytic estimate:
+
+```python
+from helix.inference import serving_benchmark, print_serving_result, ModelConfig
+
+res = serving_benchmark(ModelConfig.from_preset("mistral-7b"),
+                        batch=32, prompt_len=2048, gen_len=128,
+                        device="H100", model="mistralai/Mistral-7B-v0.1")
+print_serving_result(res)   # backend="vllm" if installed, else "analytic"
+```
+
+---
+
 ## Jupyter magic
 
 ```python
@@ -159,11 +226,15 @@ Three fused Pallas kernels ship with HelixIR. All require `jax[cuda12]` and comp
 |---|---|---|
 | `helix.kernels.rmsnorm_pallas` | variance + rsqrt + scale → 1 HBM pass | custom VJP for correct gradients |
 | `helix.kernels.rope_pallas` | freq table + rotation → 1 HBM pass | avoids intermediate half-tensors |
-| `helix.kernels.flash_attention` | online softmax, O(S) HBM | causal mask supported |
+| `helix.kernels.flash_attention` | online softmax, O(S) HBM | Pallas; causal mask supported |
+| `helix.kernels.flash_attention_triton` | online softmax, O(S) HBM | **Triton** counterpart (torch); causal supported |
 
 ```python
 from helix.kernels import rmsnorm_pallas, rope_pallas, flash_attention
+from helix.kernels import flash_attention_triton   # Triton (torch+CUDA)
 ```
+
+The Pallas and Triton flash-attention kernels implement the same online-softmax algorithm in the two languages GPU operators are actually written in — `helix compare attention` benchmarks both against the reference on your device.
 
 > **T4 note:** T4 (compute capability 7.5) does not support Pallas/Triton. Use the reference implementations (`rmsnorm_ref`, `rope_ref`, `attention_ref`) or upgrade to A100/H100.
 

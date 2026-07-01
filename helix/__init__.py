@@ -49,6 +49,12 @@ from .benchmark.runner import benchmark, compare, BenchmarkResult
 from .sharding import generate_sharding, ShardingPlan
 from .backward import analyze_backward, analyze_full, print_full_report
 from .diagnostics import runtime_diagnostics, print_diagnostics
+from .inference import (
+    ModelConfig, analyze_inference, print_inference_report,
+    kv_footprint, plan_kv_offload, available_presets,
+    serving_benchmark, print_serving_result,
+    sweep_inference, print_sweep,
+)
 
 __version__ = "0.2.0"
 __all__ = [
@@ -60,6 +66,11 @@ __all__ = [
     "analyze_backward", "analyze_full", "print_full_report",
     # Diagnostics
     "runtime_diagnostics", "print_diagnostics",
+    # Inference (KV-cache, prefill/decode roofline, offload)
+    "ModelConfig", "analyze_inference", "print_inference_report",
+    "kv_footprint", "plan_kv_offload", "available_presets",
+    "serving_benchmark", "print_serving_result",
+    "sweep_inference", "print_sweep",
     # Benchmark
     "benchmark", "compare", "BenchmarkResult",
     # Low-level
